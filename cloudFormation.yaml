@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Automated Price Drop Notification for iPad on Amazon.com
+
+Resources:
+  BackendFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt BackendRole.Arn
+      Code:
+        S3Bucket: price-drop-bucket
+        S3Key: Archive.zip
+      Runtime: python3.9
+      Timeout: 60
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: PriceHistory
+      AttributeDefinitions:
+        - AttributeName: Timestamp
+          AttributeType: S
+
+      KeySchema:
+        - AttributeName: Timestamp
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: PriceDropNotifications
+
+  SNSSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: avinashkomatineni84@gmail.com
+      Protocol: email
+      TopicArn: !Ref SNSTopic
+
+  BackendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BackendPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt DynamoDBTable.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref SNSTopic
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::price-drop-bucket"
+                  - !Sub "arn:aws:s3:::price-drop-bucket/*"
+
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref BackendFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt LambdaInvokeSchedule.Arn
+
+  LambdaInvokeSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 hours)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt BackendFunction.Arn
+          Id: TriggerLambdaEvery3Hours
+
+
